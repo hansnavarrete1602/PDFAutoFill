@@ -5,7 +5,9 @@ from guizero import App, Box, Text, PushButton, TextBox, Picture, ButtonGroup, C
 colors = ['#27272A',
           '#202020',
           '#05111D',
-          '#111828']
+          '#111828',
+          '#6495ED',
+          '#4B0082']
 
 tab_opt = [["Header", "1"],
            ["Description", "2"],
@@ -178,7 +180,11 @@ class Gui:
                                    selectcolor="blue")
 
     def set_active(self, select_box):
-        boxes = [self.header_box, self.description_box, self.location_box, self.contact_box, self.results_box]
+        boxes = [self.header_box,
+                 self.description_box,
+                 self.location_box,
+                 self.contact_box,
+                 self.results_box]
         for box in boxes:
             if box == select_box:
                 box.visible = True
@@ -228,7 +234,19 @@ class Gui:
         return entry_var
 
     def header_section(self):
+        @staticmethod
+        def submit_form():
+            values = {k: v.get() for k, v in self.textboxes.items()}
+            for k, v in values.items():
+                print(f"{k}: {v}")
+            self.app.info("Success", "Form submitted successfully.")
+
         self.header_box.bg = colors[0]
+        Box(self.header_box,
+            width=self.header_box.width,
+            height=30,
+            border=False,
+            grid=[0, 0])
         Text(self.header_box,
              text="If you are still unemployed after eight weeks of benefits,\n"
                   "you should reduce your salary requirement\n"
@@ -236,34 +254,75 @@ class Gui:
                   "Make as many copies of this as you need,\n"
                   "or print copies at\n"
                   "www.twc.texas.gov/worksearchlog",
-             size=10,
+             size=12,
              font="Times New Roman",
              color="red",
              align="top",
-             grid=[0, 0])
+             grid=[0, 1])
         Box(self.header_box,
             width=self.header_box.width,
-            height=20,
+            height=10,
             border=False,
-            grid=[0, 1])
+            grid=[0, 2])
         cont = Box(self.header_box,
                    width=400,
                    height=300,
                    border=True,
-                   grid=[0, 2],
+                   grid=[0, 3],
                    layout="grid")
         cont.bg = colors[3]
-        self.textboxes = {"Name": self.create_element(cont, "Name:", 0),
-                          "Week of": self.create_element(cont, "Week of:", 2),
-                          "To": self.create_element(cont, "To:", 4),
+        self.textboxes = {"NAME": self.create_element(cont,
+                                                      "Name:",
+                                                      0),
+                          "WEEK": self.create_element(cont,
+                                                      "Week of:",
+                                                      2),
+                          "END_DATE": self.create_element(cont,
+                                                          "To:",
+                                                          4),
                           "Social Security #": self.create_element(cont,
                                                                    "Social Security #:",
                                                                    6),
-                          "Required Search #": self.create_element(cont,
-                                                                   "Required Search #:",
-                                                                   8)}
-        for k in self.textboxes:
-            print(k, self.textboxes[k])
+                          "REQUIRED_NUMBER": self.create_element(cont,
+                                                                 "Required Search #:",
+                                                                 8),
+                          "RESULT_JOB_SEARCH": self.create_element(cont,
+                                                                   "Result Job Search:",
+                                                                   10)}
+        Box(self.header_box,
+            width=self.header_box.width,
+            height=10,
+            border=False,
+            grid=[0, 4])
+        PushButton(self.header_box,
+                   text="Submit",
+                   command=submit_form,
+                   grid=[0, 5],
+                   align="bottom").tk.config(activebackground="green",
+                                             activeforeground="white",
+                                             borderwidth=7,
+                                             cursor="hand2",
+                                             fg="white",
+                                             bg=colors[4],
+                                             relief="ridge")
+        Box(self.header_box,
+            width=self.header_box.width,
+            height=25,
+            border=False,
+            grid=[0, 6])
+        PushButton(self.header_box,
+                   text="History",
+                   width=40,
+                   height=0,
+                   command=None,
+                   grid=[0, 7],
+                   align="top").tk.config(activebackground=colors[4],
+                                          activeforeground="white",
+                                          borderwidth=7,
+                                          cursor="hand2",
+                                          fg="white",
+                                          bg=colors[5],
+                                          relief="sunken")
 
     def description_section(self):
         self.description_box.bg = colors[0]
