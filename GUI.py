@@ -1,6 +1,9 @@
 import tkinter as tk
 from tkinter import ttk
 from guizero import App, Box, Text, PushButton, TextBox, Picture, ButtonGroup, Combo
+import json
+import pdfrw
+import datetime
 
 colors = ['#27272A',
           '#202020',
@@ -15,13 +18,25 @@ tab_opt = [["Header", "1"],
            ["Contact", "4"],
            ["Results", "5"]]
 
+INVOICE_TEMPLATE_PATH = 'Busqueda trabajo workintexas may 06-may10 segunda semana.pdf'
+INVOICE_OUTPUT_PATH = 'filled_PDF'
+ANNOT_KEY = '/Annots'
+ANNOT_FIELD_KEY = '/T'
+ANNOT_VAL_KEY = '/V'
+ANNOT_RECT_KEY = '/Rect'
+SUBTYPE_KEY = '/Subtype'
+WIDGET_SUBTYPE_KEY = '/Widget'
+
 
 class Gui:
 
     def __init__(self):
-        self.combos = None
-        self.textboxes = None
+        self.section_sec = None
+        self.textboxes_location = None
+        self.textboxes_description = None
+        self.textboxes_header = None
         self.tabs = None
+        self.data = self.load_data_from_file()
         self.app = App(title="PDF AutoFiller",
                        width=800, height=600,
                        layout="grid",
@@ -153,6 +168,55 @@ class Gui:
         self.tabs_menu()
         self.display()
 
+    @staticmethod
+    def get_unique_output_path(base_output_path):
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d")
+        output_path = f"{base_output_path}_{timestamp}.pdf"
+        return output_path
+
+    @staticmethod
+    def write_fillable_pdf(input_pdf_path, output_pdf_path, data_dict):
+        template_pdf = pdfrw.PdfReader(input_pdf_path)
+        annotations = template_pdf.pages[0][ANNOT_KEY]
+        for annotation in annotations:
+            if annotation[SUBTYPE_KEY] == WIDGET_SUBTYPE_KEY:
+                if annotation[ANNOT_FIELD_KEY]:
+                    key = annotation[ANNOT_FIELD_KEY][1:-1]
+                    if key in data_dict.keys():
+                        if isinstance(data_dict[key], bool):
+                            if data_dict[key]:
+                                annotation.update(
+                                    pdfrw.PdfDict(V=pdfrw.PdfName('X'), AS=pdfrw.PdfName('X'))
+                                )
+                            else:
+                                annotation.update(
+                                    pdfrw.PdfDict(V=pdfrw.PdfName(''), AS=pdfrw.PdfName(''))
+                                )
+                        else:
+                            annotation.update(
+                                pdfrw.PdfDict(V='{}'.format(data_dict[key]))
+                            )
+        pdfrw.PdfWriter().write(output_pdf_path, template_pdf)
+
+    @staticmethod
+    def save_data_to_file(data, file_path='data.json'):
+        try:
+            with open(file_path, 'w') as f:
+                json.dump(data, f)
+        except Exception:
+            return False
+        else:
+            return True
+
+    @staticmethod
+    def load_data_from_file(file_path='data.json'):
+        try:
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            data = {}  # Retorna un diccionario vacío si el archivo no existe
+        return data
+
     def tabs_menu(self):
         Text(self.tabs_box_content,
              text="Select a tab\nto fill section:",
@@ -233,14 +297,29 @@ class Gui:
         entry.grid(column=1, row=grid_pos)
         return entry_var
 
-    def header_section(self):
-        @staticmethod
-        def submit_form():
-            values = {k: v.get() for k, v in self.textboxes.items()}
-            for k, v in values.items():
-                print(f"{k}: {v}")
-            self.app.info("Success", "Form submitted successfully.")
+    def submit_form(self, textboxes):
+        selected_number = self.section_sec.value if hasattr(self,
+                                                            'section_sec') and self.section_sec is not None else ''
+        values = {f"{k}_{selected_number}" if selected_number else k: v.get() if hasattr(v, 'get') else v for k, v in
+                  textboxes.items()}
+        unique_output_path = self.get_unique_output_path(INVOICE_OUTPUT_PATH)
+        self.write_fillable_pdf(INVOICE_TEMPLATE_PATH, unique_output_path, values)
+        for k, v in values.items():
+            print(f"{k}: {v}")
+        if not (self.save_data_to_file(values)):
+            self.app.error("Error", "An error occurred while saving the data.")
+        self.app.info("Success", "Form submitted successfully.")
 
+    def header_section(self):
+        def process_social_security(*args):
+            social_security_value = social_security_var.get()
+            parts = social_security_value.split("-")
+            if len(parts) == 3:
+                self.textboxes_header["SOCIAL_FIRST_3"], self.textboxes_header["SOCAL_MIDDLE_2"], \
+                    self.textboxes_header[
+                        "SOCAL_LAST_4"] = parts
+
+        self.data = self.load_data_from_file()
         self.header_box.bg = colors[0]
         Box(self.header_box,
             width=self.header_box.width,
@@ -271,24 +350,31 @@ class Gui:
                    grid=[0, 3],
                    layout="grid")
         cont.bg = colors[3]
-        self.textboxes = {"NAME": self.create_element(cont,
-                                                      "Name:",
-                                                      0),
-                          "WEEK": self.create_element(cont,
-                                                      "Week of:",
-                                                      2),
-                          "END_DATE": self.create_element(cont,
-                                                          "To:",
-                                                          4),
-                          "Social Security #": self.create_element(cont,
-                                                                   "Social Security #:",
-                                                                   6),
-                          "REQUIRED_NUMBER": self.create_element(cont,
-                                                                 "Required Search #:",
-                                                                 8),
-                          "RESULT_JOB_SEARCH": self.create_element(cont,
-                                                                   "Result Job Search:",
-                                                                   10)}
+        self.textboxes_header = {"NAME": self.create_element(cont,
+                                                             "Name:",
+                                                             0),
+                                 "WEEK": self.create_element(cont,
+                                                             "Week of:",
+                                                             2),
+                                 "END_DATE": self.create_element(cont,
+                                                                 "To:",
+                                                                 4),
+                                 "SOCIAL_FIRST_3": None,  # Preparar para almacenar la primera parte
+                                 "SOCAL_MIDDLE_2": None,  # Preparar para almacenar la segunda parte
+                                 "SOCAL_LAST_4": None,  # Preparar para almacenar la tercera parte
+                                 "REQUIRED_NUMBER": self.create_element(cont,
+                                                                        "Required Search #:",
+                                                                        8),
+                                 "RESULT_JOB_SEARCH": self.create_element(cont,
+                                                                          "Result Job Search:",
+                                                                          10)}
+
+        social_security_var = self.create_element(cont, "Social Security #:", 6)
+        # Llamar a process_social_security cada vez que el valor de social_security_var cambie
+        social_security_var.trace("w", process_social_security)
+        for key, textbox in self.textboxes_header.items():
+            if key in self.data:
+                textbox.set(self.data[key])
         Box(self.header_box,
             width=self.header_box.width,
             height=10,
@@ -296,7 +382,7 @@ class Gui:
             grid=[0, 4])
         PushButton(self.header_box,
                    text="Submit",
-                   command=submit_form,
+                   command=lambda: self.submit_form(self.textboxes_header),
                    grid=[0, 5],
                    align="bottom").tk.config(activebackground="green",
                                              activeforeground="white",
@@ -325,18 +411,198 @@ class Gui:
                                           relief="sunken")
 
     def description_section(self):
+        self.data = self.load_data_from_file()
         self.description_box.bg = colors[0]
-        pass
+        Box(self.description_box,
+            width=self.description_box.width,
+            height=30,
+            border=False,
+            grid=[0, 0])
+        Text(self.description_box,
+             text="Applied for job, submitted resume, attended job fair,\n"
+                  "interviewed, used Workforce Center, searched online, etc.",
+             size=12,
+             font="Times New Roman",
+             color="red",
+             align="top",
+             grid=[0, 1])
+        Box(self.description_box,
+            width=self.description_box.width,
+            height=80,
+            border=False,
+            grid=[0, 2])
+        cont = Box(self.description_box,
+                   width=400,
+                   height=300,
+                   border=True,
+                   grid=[0, 3],
+                   layout="grid")
+        cont.bg = colors[3]
+        self.textboxes_description = {"DATE_ACT": self.create_element(cont,
+                                                                      "Date of Activity:",
+                                                                      0),
+                                      "WORK_SEARCH": self.create_element(cont,
+                                                                         "Work Search Activity:",
+                                                                         2),
+                                      "JOB_TYPE": self.create_element(cont,
+                                                                      "Type of Job:",
+                                                                      4)}
+        Text(cont,
+             text="Select Form Section:",
+             size=10,
+             font="Arial",
+             color="white",
+             grid=[0, 6],
+             align="left")
+        self.section_sec = Combo(cont,
+                                 options=["1", "2", "3", "4", "5"],
+                                 selected="1",
+                                 align="left",
+                                 grid=[0, 7])
+        self.section_sec.bg = "#C71585"
+        for key, textbox in self.textboxes_description.items():
+            if key in self.data:
+                textbox.set(self.data[key])
+        Box(self.description_box,
+            width=self.description_box.width,
+            height=10,
+            border=False,
+            grid=[0, 4])
+        PushButton(self.description_box,
+                   text="Submit",
+                   command=lambda: self.submit_form(self.textboxes_description),
+                   grid=[0, 5],
+                   align="bottom").tk.config(activebackground="green",
+                                             activeforeground="white",
+                                             borderwidth=7,
+                                             cursor="hand2",
+                                             fg="white",
+                                             bg=colors[4],
+                                             relief="ridge")
+        Box(self.description_box,
+            width=self.description_box.width,
+            height=75,
+            border=False,
+            grid=[0, 6])
+        PushButton(self.description_box,
+                   text="History",
+                   width=40,
+                   height=0,
+                   command=None,
+                   grid=[0, 7],
+                   align="top").tk.config(activebackground=colors[4],
+                                          activeforeground="white",
+                                          borderwidth=7,
+                                          cursor="hand2",
+                                          fg="white",
+                                          bg=colors[5],
+                                          relief="sunken")
 
     def location_section(self):
+        self.data = self.load_data_from_file()
         self.location_box.bg = colors[0]
-        pass
+        Box(self.location_box,
+            width=self.location_box.width,
+            height=30,
+            border=False,
+            grid=[0, 0])
+        Text(self.location_box,
+             text="Name, Location and Telephone Number of\n"
+                  "Employer/Service/Agency\n"
+                  "(For address, use street or Internet address)",
+             size=12,
+             font="Times New Roman",
+             color="red",
+             align="top",
+             grid=[0, 1])
+        Box(self.location_box,
+            width=self.location_box.width,
+            height=80,
+            border=False,
+            grid=[0, 2])
+        cont = Box(self.location_box,
+                   width=400,
+                   height=300,
+                   border=True,
+                   grid=[0, 3],
+                   layout="grid")
+        cont.bg = colors[3]
+        self.textboxes_location = {"ORG_NAME": self.create_element(cont,
+                                                                   "Name:",
+                                                                   0),
+                                   "ORG_ADD": self.create_element(cont,
+                                                                  "Address:",
+                                                                  2),
+                                   "C_S_Z": self.create_element(cont,
+                                                                "City, Staate, Zip Code:",
+                                                                4),
+                                   "AREA_CODE": self.create_element(cont,
+                                                                    "Area Code:",
+                                                                    6),
+                                   "PHONE_3_MIDDLE": self.create_element(cont,
+                                                                         "Phone 3 first number:",
+                                                                         8),
+                                   "PHONE_4_LAST": self.create_element(cont,
+                                                                       "Phone 4 last number:",
+                                                                       10)}
+        Text(cont,
+             text="Select Form Section:",
+             size=10,
+             font="Arial",
+             color="white",
+             grid=[0, 12],
+             align="left")
+        self.section_sec = Combo(cont,
+                                 options=["1", "2", "3", "4", "5"],
+                                 selected="1",
+                                 align="left",
+                                 grid=[0, 13])
+        self.section_sec.bg = "#C71585"
+        for key, textbox in self.textboxes_location.items():
+            if key in self.data:
+                textbox.set(self.data[key])
+        Box(self.location_box,
+            width=self.location_box.width,
+            height=10,
+            border=False,
+            grid=[0, 13])
+        PushButton(self.location_box,
+                   text="Submit",
+                   command=lambda: self.submit_form(self.textboxes_location),
+                   grid=[0, 14],
+                   align="bottom").tk.config(activebackground="green",
+                                             activeforeground="white",
+                                             borderwidth=7,
+                                             cursor="hand2",
+                                             fg="white",
+                                             bg=colors[4],
+                                             relief="ridge")
+        Box(self.location_box,
+            width=self.location_box.width,
+            height=75,
+            border=False,
+            grid=[0, 15])
+        PushButton(self.location_box,
+                   text="History",
+                   width=40,
+                   height=0,
+                   command=None,
+                   grid=[0, 16],
+                   align="top").tk.config(activebackground=colors[4],
+                                          activeforeground="white",
+                                          borderwidth=7,
+                                          cursor="hand2",
+                                          fg="white",
+                                          bg=colors[5],
+                                          relief="sunken")
 
     def contact_section(self):
+        self.data = self.load_data_from_file()
         self.contact_box.bg = colors[0]
         pass
 
     def results_section(self):
+        self.data = self.load_data_from_file()
         self.results_box.bg = colors[0]
         pass
 
