@@ -1,6 +1,6 @@
 import tkinter as tk
-from tkinter import ttk
-from guizero import App, Box, Text, PushButton, TextBox, Picture, ButtonGroup, Combo
+from tkinter import ttk, BooleanVar
+from guizero import App, Box, Text, PushButton, TextBox, Picture, ButtonGroup, Combo, CheckBox
 import json
 import pdfrw
 import datetime
@@ -31,6 +31,7 @@ WIDGET_SUBTYPE_KEY = '/Widget'
 class Gui:
 
     def __init__(self):
+        self.textboxes_contact = None
         self.section_sec = None
         self.textboxes_location = None
         self.textboxes_description = None
@@ -200,10 +201,20 @@ class Gui:
 
     @staticmethod
     def save_data_to_file(data, file_path='data.json'):
+        # Prepare a new dictionary to hold the serializable data
+        serializable_data = {}
+        for key, value in data.items():
+            # If the value is a CheckBox, store its state (value property)
+            if isinstance(value, CheckBox):
+                serializable_data[key] = value.value
+            else:
+                # If the value is not a CheckBox, store it as is
+                serializable_data[key] = value
         try:
             with open(file_path, 'w') as f:
-                json.dump(data, f)
-        except Exception:
+                json.dump(serializable_data, f)
+        except Exception as e:
+            print(e)
             return False
         else:
             return True
@@ -212,10 +223,10 @@ class Gui:
     def load_data_from_file(file_path='data.json'):
         try:
             with open(file_path, 'r') as f:
-                data = json.load(f)
-        except FileNotFoundError:
-            data = {}  # Retorna un diccionario vacío si el archivo no existe
-        return data
+                data = f.read()
+                return json.loads(data) if data else {}
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
 
     def tabs_menu(self):
         Text(self.tabs_box_content,
@@ -297,17 +308,40 @@ class Gui:
         entry.grid(column=1, row=grid_pos)
         return entry_var
 
+    def populate_textboxes(self, textboxes):
+        for key, textbox in textboxes.items():
+            if textbox is not None and key in self.data:
+                textbox.set(self.data[key])
+
+    def update_textboxes(self, textboxes, selected_number):
+        self.data = self.load_data_from_file()
+        for key, textbox in textboxes.items():
+            full_key = f"{key}_{selected_number}"
+            if textbox is not None and full_key in self.data:
+                textbox.set(self.data[full_key])
+            else:
+                textbox.set("")
+
+    def clear_textboxes(self, textboxes, selected_number):
+        for key, textbox in textboxes.items():
+            if textbox is not None:
+                textbox.set("")
+                full_key = f"{key}_{selected_number}"
+                if full_key in self.data:
+                    del self.data[full_key]  # Elimina la entrada del diccionario
+        self.save_data_to_file(self.data)  # Guarda el diccionario actualizado en el archivo JSON
+
     def submit_form(self, textboxes):
-        selected_number = self.section_sec.value if hasattr(self,
-                                                            'section_sec') and self.section_sec is not None else ''
-        values = {f"{k}_{selected_number}" if selected_number else k: v.get() if hasattr(v, 'get') else v for k, v in
-                  textboxes.items()}
+        selected_number = self.section_sec.value if hasattr(self, 'section_sec') and self.section_sec is not None else ''
+        values = {f"{k}_{selected_number}" if selected_number else k: v.get() if hasattr(v, 'get') else v for k, v in textboxes.items()}
         unique_output_path = self.get_unique_output_path(INVOICE_OUTPUT_PATH)
-        self.write_fillable_pdf(INVOICE_TEMPLATE_PATH, unique_output_path, values)
-        for k, v in values.items():
-            print(f"{k}: {v}")
-        if not (self.save_data_to_file(values)):
+        existing_data = self.load_data_from_file()
+        existing_data.update(values)
+        if not (self.save_data_to_file(existing_data)):
             self.app.error("Error", "An error occurred while saving the data.")
+        Gui.write_fillable_pdf(INVOICE_TEMPLATE_PATH, unique_output_path, existing_data)
+        for k, v in existing_data.items():
+            print(f"{k}: {v}")
         self.app.info("Success", "Form submitted successfully.")
 
     def header_section(self):
@@ -372,9 +406,7 @@ class Gui:
         social_security_var = self.create_element(cont, "Social Security #:", 6)
         # Llamar a process_social_security cada vez que el valor de social_security_var cambie
         social_security_var.trace("w", process_social_security)
-        for key, textbox in self.textboxes_header.items():
-            if key in self.data:
-                textbox.set(self.data[key])
+        self.populate_textboxes(self.textboxes_header)
         Box(self.header_box,
             width=self.header_box.width,
             height=10,
@@ -415,7 +447,7 @@ class Gui:
         self.description_box.bg = colors[0]
         Box(self.description_box,
             width=self.description_box.width,
-            height=30,
+            height=45,
             border=False,
             grid=[0, 0])
         Text(self.description_box,
@@ -428,7 +460,7 @@ class Gui:
              grid=[0, 1])
         Box(self.description_box,
             width=self.description_box.width,
-            height=80,
+            height=60,
             border=False,
             grid=[0, 2])
         cont = Box(self.description_box,
@@ -456,13 +488,40 @@ class Gui:
              align="left")
         self.section_sec = Combo(cont,
                                  options=["1", "2", "3", "4", "5"],
-                                 selected="1",
+                                 selected="",
                                  align="left",
-                                 grid=[0, 7])
+                                 grid=[1, 6])
         self.section_sec.bg = "#C71585"
-        for key, textbox in self.textboxes_description.items():
-            if key in self.data:
-                textbox.set(self.data[key])
+        self.populate_textboxes(self.textboxes_description)
+        Text(cont,
+             text="Options Section:",
+             size=10,
+             font="Arial",
+             color="white",
+             grid=[0, 9],
+             align="left")
+        PushButton(cont,
+                   text="Reload",
+                   command=lambda: self.update_textboxes(self.textboxes_description, self.section_sec.value),
+                   grid=[1, 9],
+                   align="left").tk.config(activebackground="green",
+                                           activeforeground="white",
+                                           borderwidth=0,
+                                           cursor="hand2",
+                                           fg="white",
+                                           bg=colors[5],
+                                           relief="sunken")
+        PushButton(cont,
+                   text="Erase",
+                   command=lambda: self.clear_textboxes(self.textboxes_description, self.section_sec.value),
+                   grid=[1, 9],
+                   align="right").tk.config(activebackground="red",
+                                            activeforeground="white",
+                                            borderwidth=0,
+                                            cursor="hand2",
+                                            fg="white",
+                                            bg=colors[5],
+                                            relief="sunken")
         Box(self.description_box,
             width=self.description_box.width,
             height=10,
@@ -481,7 +540,7 @@ class Gui:
                                              relief="ridge")
         Box(self.description_box,
             width=self.description_box.width,
-            height=75,
+            height=35,
             border=False,
             grid=[0, 6])
         PushButton(self.description_box,
@@ -503,7 +562,7 @@ class Gui:
         self.location_box.bg = colors[0]
         Box(self.location_box,
             width=self.location_box.width,
-            height=30,
+            height=10,
             border=False,
             grid=[0, 0])
         Text(self.location_box,
@@ -517,7 +576,7 @@ class Gui:
              grid=[0, 1])
         Box(self.location_box,
             width=self.location_box.width,
-            height=80,
+            height=25,
             border=False,
             grid=[0, 2])
         cont = Box(self.location_box,
@@ -554,22 +613,49 @@ class Gui:
              align="left")
         self.section_sec = Combo(cont,
                                  options=["1", "2", "3", "4", "5"],
-                                 selected="1",
+                                 selected="",
                                  align="left",
-                                 grid=[0, 13])
+                                 grid=[1, 12])
         self.section_sec.bg = "#C71585"
-        for key, textbox in self.textboxes_location.items():
-            if key in self.data:
-                textbox.set(self.data[key])
+        self.populate_textboxes(self.textboxes_location)
+        Text(cont,
+             text="Options Section:",
+             size=10,
+             font="Arial",
+             color="white",
+             grid=[0, 15],
+             align="left")
+        PushButton(cont,
+                   text="Read",
+                   command=lambda: self.update_textboxes(self.textboxes_location, self.section_sec.value),
+                   grid=[1, 15],
+                   align="left").tk.config(activebackground="green",
+                                           activeforeground="white",
+                                           borderwidth=0,
+                                           cursor="hand2",
+                                           fg="white",
+                                           bg=colors[5],
+                                           relief="sunken")
+        PushButton(cont,
+                   text="Erase",
+                   command=lambda: self.clear_textboxes(self.textboxes_location, self.section_sec.value),
+                   grid=[1, 15],
+                   align="right").tk.config(activebackground="red",
+                                            activeforeground="white",
+                                            borderwidth=0,
+                                            cursor="hand2",
+                                            fg="white",
+                                            bg=colors[5],
+                                            relief="sunken")
         Box(self.location_box,
             width=self.location_box.width,
             height=10,
             border=False,
-            grid=[0, 13])
+            grid=[0, 4])
         PushButton(self.location_box,
                    text="Submit",
                    command=lambda: self.submit_form(self.textboxes_location),
-                   grid=[0, 14],
+                   grid=[0, 5],
                    align="bottom").tk.config(activebackground="green",
                                              activeforeground="white",
                                              borderwidth=7,
@@ -579,15 +665,15 @@ class Gui:
                                              relief="ridge")
         Box(self.location_box,
             width=self.location_box.width,
-            height=75,
+            height=20,
             border=False,
-            grid=[0, 15])
+            grid=[0, 6])
         PushButton(self.location_box,
                    text="History",
                    width=40,
                    height=0,
                    command=None,
-                   grid=[0, 16],
+                   grid=[0, 7],
                    align="top").tk.config(activebackground=colors[4],
                                           activeforeground="white",
                                           borderwidth=7,
@@ -599,7 +685,130 @@ class Gui:
     def contact_section(self):
         self.data = self.load_data_from_file()
         self.contact_box.bg = colors[0]
-        pass
+        Box(self.contact_box,
+            width=self.contact_box.width,
+            height=10,
+            border=False,
+            grid=[0, 0])
+        Text(self.contact_box,
+             text="Contact Information\n"
+                  "Complete all that apply",
+             size=12,
+             font="Times New Roman",
+             color="red",
+             align="top",
+             grid=[0, 1])
+        Box(self.contact_box,
+            width=self.contact_box.width,
+            height=25,
+            border=False,
+            grid=[0, 2])
+        cont = Box(self.contact_box,
+                   width=400,
+                   height=300,
+                   border=True,
+                   grid=[0, 3],
+                   layout="grid")
+        cont.bg = colors[3]
+        self.textboxes_contact = {"CONTACT_PERSON": self.create_element(cont,
+                                                                        "Person Contacted:",
+                                                                        0),
+                                  "FAX_AREA_CODE": self.create_element(cont,
+                                                                       "Fax Area Code:",
+                                                                       2),
+                                  "FAX_3_MIDDLE_NUMBER": self.create_element(cont,
+                                                                             "Fax 3 Middle Number:",
+                                                                             4),
+                                  "FAX_4_LAST_NUMBER": self.create_element(cont,
+                                                                           "Fax 4 Last Number:",
+                                                                           6),
+                                  "MAIL_CONTACT_CHECK": CheckBox(cont,
+                                                                 text="Mail Contact",
+                                                                 grid=[0, 8]),
+                                  "MAIL_CONTACTED_CHECK": CheckBox(cont,
+                                                                   text="Mail Contacted",
+                                                                   grid=[0, 9]),
+                                  "FAX_CONTACT_CHECK": CheckBox(cont,
+                                                                text="Fax Contact",
+                                                                grid=[0, 10])}
+        self.populate_textboxes(self.textboxes_contact)
+        Text(cont,
+             text="Select Form Section:",
+             size=10,
+             font="Arial",
+             color="white",
+             grid=[0, 12],
+             align="left")
+        self.section_sec = Combo(cont,
+                                 options=["1", "2", "3", "4", "5"],
+                                 selected="",
+                                 align="left",
+                                 grid=[1, 12])
+        self.section_sec.bg = "#C71585"
+        self.populate_textboxes(self.textboxes_contact)
+        Text(cont,
+             text="Options Section:",
+             size=10,
+             font="Arial",
+             color="white",
+             grid=[0, 15],
+             align="left")
+        PushButton(cont,
+                   text="Read",
+                   command=lambda: self.update_textboxes(self.textboxes_contact, self.section_sec.value),
+                   grid=[1, 15],
+                   align="left").tk.config(activebackground="green",
+                                           activeforeground="white",
+                                           borderwidth=0,
+                                           cursor="hand2",
+                                           fg="white",
+                                           bg=colors[5],
+                                           relief="sunken")
+        PushButton(cont,
+                   text="Erase",
+                   command=lambda: self.clear_textboxes(self.textboxes_contact, self.section_sec.value),
+                   grid=[1, 15],
+                   align="right").tk.config(activebackground="red",
+                                            activeforeground="white",
+                                            borderwidth=0,
+                                            cursor="hand2",
+                                            fg="white",
+                                            bg=colors[5],
+                                            relief="sunken")
+        Box(self.contact_box,
+            width=self.contact_box.width,
+            height=10,
+            border=False,
+            grid=[0, 4])
+        PushButton(self.contact_box,
+                   text="Submit",
+                   command=lambda: self.submit_form(self.textboxes_contact),
+                   grid=[0, 5],
+                   align="bottom").tk.config(activebackground="green",
+                                             activeforeground="white",
+                                             borderwidth=7,
+                                             cursor="hand2",
+                                             fg="white",
+                                             bg=colors[4],
+                                             relief="ridge")
+        Box(self.contact_box,
+            width=self.contact_box.width,
+            height=20,
+            border=False,
+            grid=[0, 6])
+        PushButton(self.contact_box,
+                   text="History",
+                   width=40,
+                   height=0,
+                   command=None,
+                   grid=[0, 7],
+                   align="top").tk.config(activebackground=colors[4],
+                                          activeforeground="white",
+                                          borderwidth=7,
+                                          cursor="hand2",
+                                          fg="white",
+                                          bg=colors[5],
+                                          relief="sunken")
 
     def results_section(self):
         self.data = self.load_data_from_file()
