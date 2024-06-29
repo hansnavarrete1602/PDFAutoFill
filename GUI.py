@@ -28,6 +28,8 @@ ANNOT_RECT_KEY = '/Rect'
 SUBTYPE_KEY = '/Subtype'
 WIDGET_SUBTYPE_KEY = '/Widget'
 
+# pyinstaller --onefile --name WorkPDFill --windowed --paths C:\Users\hansn\OneDrive\Escritorio\PDF_Filler GUI.py
+
 
 class Gui:
 
@@ -43,7 +45,7 @@ class Gui:
         self.history_file_path = 'history.json'
         self.data = self.load_data_from_file()
         self.app = App(title="Work in Texas PDF Filler",
-                       width=800, height=600,
+                       width=800, height=620,
                        layout="grid",
                        bg=colors[1])
         self.box_header = Box(self.app,
@@ -65,24 +67,58 @@ class Gui:
             grid=[0, 1])
         self.box_body = Box(self.app,
                             width=self.app.width,
-                            height=int(self.app.height) - 100,
+                            height=int(self.app.height) - 115,
                             border=False,
                             grid=[0, 2],
                             layout="grid")
         self.box_body.bg = colors[2]
         self.box_footer = Box(self.app,
                               width=self.app.width,
-                              height=100,
+                              height=50,
                               border=False,
                               grid=[0, 3],
                               layout="grid")
-        self.time_label = tk.Label(self.box_footer.tk, text="")
-        self.time_label.pack(side='left')
-        self.update_time()
-        export_button = tk.Button(self.box_footer.tk, text="export history", command=self.export_history)
-        export_button.pack(side='right')
-        pdf_button = tk.Button(self.box_footer.tk, text="show PDF", command=self.show_pdf)
-        pdf_button.pack(side='right')
+        Box(self.box_footer,
+            width=50,
+            height=50,
+            border=False,
+            grid=[0, 0])
+        self.time_label = Text(self.box_footer,
+                               text="",
+                               size=10,
+                               font="Arial",
+                               color="white",
+                               grid=[1, 0])
+        Box(self.box_footer,
+            width=430,
+            height=50,
+            border=False,
+            grid=[2, 0])
+        PushButton(self.box_footer,
+                   text="Export History",
+                   command=self.export_history,
+                   grid=[3, 0]).tk.config(activebackground=colors[4],
+                                          activeforeground="white",
+                                          borderwidth=1,
+                                          cursor="hand2",
+                                          fg="white",
+                                          bg=colors[5],
+                                          relief="sunken")
+        Box(self.box_footer,
+            width=15,
+            height=50,
+            border=False,
+            grid=[4, 0])
+        PushButton(self.box_footer,
+                   text="Show PDF",
+                   command=self.show_pdf,
+                   grid=[5, 0]).tk.config(activebackground=colors[4],
+                                          activeforeground="white",
+                                          borderwidth=1,
+                                          cursor="hand2",
+                                          fg="white",
+                                          bg=colors[5],
+                                          relief="sunken")
         Box(self.box_body,
             width=int(self.box_body.width / 6),
             height=self.box_body.height,
@@ -184,6 +220,7 @@ class Gui:
             border=False,
             grid=[4, 0])
         self.tabs_menu()
+        self.time_label.repeat(1000, self.update_time)
         self.app.when_closed = self.do_this_when_closed
         self.app.display()
 
@@ -201,14 +238,46 @@ class Gui:
     def update_time(self):
         # Actualizar la hora y la fecha actual
         now = datetime.datetime.now()
-        self.time_label.config(text=now.strftime("%Y-%m-%d %H:%M:%S"))
-        self.box_footer.tk.after(1000, self.update_time)  # Actualizar cada segundo
+        self.time_label.value = now.strftime("%Y-%m-%d\n%H:%M:%S")
 
     def export_history(self):
-        pass
+        try:
+            # Leer el archivo JSON
+            with open(self.history_file_path, 'r') as f:
+                history = json.load(f)
+
+            # Aplanar el JSON y convertirlo en un DataFrame
+            flattened_data = []
+            for section, records in history.items():
+                for record in records:
+                    for key, value in record.items():
+                        if isinstance(value, list) and value and isinstance(value[0], dict):
+                            for i, item in enumerate(value):
+                                flattened_item = {f"{key}_{sub_key}_{i}": sub_value for sub_key, sub_value in item.items()}
+                                flattened_data.append(flattened_item)
+                        else:
+                            flattened_data.append({key: value})
+
+            df = pd.json_normalize(flattened_data)
+
+            # Reemplazar los NaN con una cadena vacía
+            df = df.fillna('')
+
+            # Exportar el DataFrame a CSV sin nombres de columnas
+            csv_file_path = 'history.csv'
+            df.to_csv(csv_file_path, sep=',', index=False, header=False)
+
+            self.app.info("Success", "History exported successfully.")
+        except Exception as e:
+            self.app.error("Error", f"An error occurred while exporting the history: {e}")
 
     def show_pdf(self):
-        pass
+        import webbrowser
+        try:
+            webbrowser.open_new_tab(self.get_unique_output_path(INVOICE_OUTPUT_PATH))
+        except Exception as e:
+            self.app.error("Error", f"Error opening the PDF file: {e}")
+            pass
 
     @staticmethod
     def write_fillable_pdf(input_pdf_path, output_pdf_path, data_dict):
