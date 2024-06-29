@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, BooleanVar
 from guizero import App, Box, Text, PushButton, TextBox, Picture, ButtonGroup, Combo, CheckBox
+import pandas as pd
 import json
 import pdfrw
 import datetime
@@ -18,7 +19,7 @@ tab_opt = [["Header", "1"],
            ["Contact", "4"],
            ["Results", "5"]]
 
-INVOICE_TEMPLATE_PATH = 'Busqueda trabajo workintexas may 06-may10 segunda semana.pdf'
+INVOICE_TEMPLATE_PATH = 'Template.pdf'
 INVOICE_OUTPUT_PATH = 'filled_PDF'
 ANNOT_KEY = '/Annots'
 ANNOT_FIELD_KEY = '/T'
@@ -37,8 +38,11 @@ class Gui:
         self.textboxes_description = None
         self.textboxes_header = None
         self.tabs = None
+        self.tabs_to_sections = {"1": "header", "2": "description", "3": "location", "4": "contact", "5": "results"}
+        self.history = {"header": [], "description": [], "location": [], "contact": [], "results": []}
+        self.history_file_path = 'history.json'
         self.data = self.load_data_from_file()
-        self.app = App(title="PDF AutoFiller",
+        self.app = App(title="Work in Texas PDF Filler",
                        width=800, height=600,
                        layout="grid",
                        bg=colors[1])
@@ -49,7 +53,7 @@ class Gui:
                               grid=[0, 0])
         self.box_header.bg = colors[1]
         Text(self.box_header,
-             text="PDF AutoFiller",
+             text="Work in Texas PDF Form",
              size=25,
              font="Arial",
              color="white",
@@ -66,8 +70,21 @@ class Gui:
                             grid=[0, 2],
                             layout="grid")
         self.box_body.bg = colors[2]
+        self.box_footer = Box(self.app,
+                              width=self.app.width,
+                              height=100,
+                              border=False,
+                              grid=[0, 3],
+                              layout="grid")
+        self.time_label = tk.Label(self.box_footer.tk, text="")
+        self.time_label.pack(side='left')
+        self.update_time()
+        export_button = tk.Button(self.box_footer.tk, text="export history", command=self.export_history)
+        export_button.pack(side='right')
+        pdf_button = tk.Button(self.box_footer.tk, text="show PDF", command=self.show_pdf)
+        pdf_button.pack(side='right')
         Box(self.box_body,
-            width=int((int(self.box_body.width) / 10) * 1.5),
+            width=int(self.box_body.width / 6),
             height=self.box_body.height,
             border=False,
             grid=[0, 0])
@@ -133,7 +150,7 @@ class Gui:
             border=False,
             grid=[0, 2])
         Box(self.box_body,
-            width=int((int(self.box_body.width) / 10) / 2),
+            width=int((int(self.box_body.width) / 10) / 8),
             height=self.box_body.height,
             border=False,
             grid=[2, 0])
@@ -162,18 +179,36 @@ class Gui:
             border=False,
             grid=[0, 2])
         Box(self.box_body,
-            width=int((int(self.box_body.width) / 10) * 1.5),
+            width=int(self.box_body.width / 10),
             height=self.box_body.height,
             border=False,
             grid=[4, 0])
         self.tabs_menu()
-        self.display()
+        self.app.when_closed = self.do_this_when_closed
+        self.app.display()
 
-    @staticmethod
-    def get_unique_output_path(base_output_path):
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d")
-        output_path = f"{base_output_path}_{timestamp}.pdf"
+    def get_unique_output_path(self, base_output_path):
+        week_date = self.data.get('WEEK', '')
+        end_date = self.data.get('END_DATE', '')
+        try:
+            week_date = datetime.datetime.strptime(week_date, '%Y/%m/%d').strftime('%d-%b-%y')
+            end_date = datetime.datetime.strptime(end_date, '%Y/%m/%d').strftime('%d-%b-%y')
+        except ValueError:
+            pass
+        output_path = f"{base_output_path}_{week_date}_{end_date}.pdf"
         return output_path
+
+    def update_time(self):
+        # Actualizar la hora y la fecha actual
+        now = datetime.datetime.now()
+        self.time_label.config(text=now.strftime("%Y-%m-%d %H:%M:%S"))
+        self.box_footer.tk.after(1000, self.update_time)  # Actualizar cada segundo
+
+    def export_history(self):
+        pass
+
+    def show_pdf(self):
+        pass
 
     @staticmethod
     def write_fillable_pdf(input_pdf_path, output_pdf_path, data_dict):
@@ -317,31 +352,86 @@ class Gui:
         self.data = self.load_data_from_file()
         for key, textbox in textboxes.items():
             full_key = f"{key}_{selected_number}"
-            if textbox is not None and full_key in self.data:
-                textbox.set(self.data[full_key])
+            if full_key in self.data:
+                if isinstance(textbox, CheckBox):
+                    textbox.value = self.data[full_key]
+                else:
+                    textbox.set(self.data[full_key])
             else:
-                textbox.set("")
+                if isinstance(textbox, CheckBox):
+                    textbox.value = 0
+                else:
+                    textbox.set("")
 
     def clear_textboxes(self, textboxes, selected_number):
         for key, textbox in textboxes.items():
             if textbox is not None:
-                textbox.set("")
+                if isinstance(textbox, CheckBox):
+                    textbox.value = 0
+                else:
+                    textbox.set("")
                 full_key = f"{key}_{selected_number}"
                 if full_key in self.data:
                     del self.data[full_key]  # Elimina la entrada del diccionario
         self.save_data_to_file(self.data)  # Guarda el diccionario actualizado en el archivo JSON
 
+    def show_history(self):
+        section = self.tabs_to_sections[self.tabs.value]
+        with open(self.history_file_path, 'r') as f:
+            history = json.load(f).get(section, [])
+        # Crea un DataFrame a partir de los registros de la historia, utilizando las claves como nombres de las columnas
+        df = pd.DataFrame.from_records(history)
+        self.show_df_in_table(df)
+
+    @staticmethod
+    def show_df_in_table(df):
+        df = df.fillna('')  # Rellena los NaN con una cadena vacía
+        df = df.transpose()  # Transpone el DataFrame si es necesario para tu diseño específico
+
+        window = tk.Tk()
+        window.title("DataFrame")
+        frame = ttk.Frame(window)
+        frame.pack(fill='both', expand=True)
+        treeview = ttk.Treeview(frame)
+        treeview["columns"] = list(df.columns)
+        treeview["show"] = ""  # Modificado para no mostrar los encabezados
+
+        for column in df.columns:
+            treeview.column(column, width=100)
+            # La línea siguiente se omite para no establecer encabezados
+            # treeview.heading(column, text=column)  # No se establece el texto del encabezado
+
+        for index, row in df.iterrows():
+            treeview.insert("", "end", values=list(row))  # Inserta los valores en la tabla
+
+        scrollbar = ttk.Scrollbar(frame, orient='vertical', command=treeview.yview)
+        treeview.configure(yscrollcommand=scrollbar.set)
+        treeview.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+        window.mainloop()
+
     def submit_form(self, textboxes):
-        selected_number = self.section_sec.value if hasattr(self, 'section_sec') and self.section_sec is not None else ''
-        values = {f"{k}_{selected_number}" if selected_number else k: v.get() if hasattr(v, 'get') else v for k, v in textboxes.items()}
+        selected_number = self.section_sec.value if hasattr(self,
+                                                            'section_sec') and self.section_sec is not None else ''
+        values = {}
+        for k, v in textboxes.items():
+            if isinstance(v, CheckBox):
+                # Si es un CheckBox, almacena 1 si está seleccionado, de lo contrario almacena ""
+                values[f"{k}_{selected_number}" if selected_number else k] = '1' if v.value else ''
+            else:
+                values[f"{k}_{selected_number}" if selected_number else k] = v.get() if hasattr(v, 'get') else v
         unique_output_path = self.get_unique_output_path(INVOICE_OUTPUT_PATH)
         existing_data = self.load_data_from_file()
         existing_data.update(values)
+        section = self.tabs_to_sections[self.tabs.value]
+        self.history[section].append(values)  # Add the values to the history of the section
+        with open(self.history_file_path, 'w') as f:
+            json.dump(self.history, f)
         if not (self.save_data_to_file(existing_data)):
             self.app.error("Error", "An error occurred while saving the data.")
         Gui.write_fillable_pdf(INVOICE_TEMPLATE_PATH, unique_output_path, existing_data)
-        for k, v in existing_data.items():
-            print(f"{k}: {v}")
+        '''for k, v in existing_data.items():
+            print(f"{k}: {v}")'''
         self.app.info("Success", "Form submitted successfully.")
 
     def header_section(self):
@@ -432,7 +522,7 @@ class Gui:
                    text="History",
                    width=40,
                    height=0,
-                   command=None,
+                   command=self.show_history,
                    grid=[0, 7],
                    align="top").tk.config(activebackground=colors[4],
                                           activeforeground="white",
@@ -460,7 +550,7 @@ class Gui:
              grid=[0, 1])
         Box(self.description_box,
             width=self.description_box.width,
-            height=60,
+            height=50,
             border=False,
             grid=[0, 2])
         cont = Box(self.description_box,
@@ -483,41 +573,41 @@ class Gui:
              text="Select Form Section:",
              size=10,
              font="Arial",
-             color="white",
+             color="#FFCE51",
              grid=[0, 6],
              align="left")
         self.section_sec = Combo(cont,
                                  options=["1", "2", "3", "4", "5"],
                                  selected="",
-                                 align="left",
-                                 grid=[1, 6])
+                                 align="top",
+                                 grid=[0, 7])
         self.section_sec.bg = "#C71585"
         self.populate_textboxes(self.textboxes_description)
         Text(cont,
              text="Options Section:",
              size=10,
              font="Arial",
-             color="white",
-             grid=[0, 9],
+             color="#FFCE51",
+             grid=[1, 6, 1, 2],
              align="left")
         PushButton(cont,
-                   text="Reload",
+                   text="Read",
                    command=lambda: self.update_textboxes(self.textboxes_description, self.section_sec.value),
-                   grid=[1, 9],
-                   align="left").tk.config(activebackground="green",
-                                           activeforeground="white",
-                                           borderwidth=0,
-                                           cursor="hand2",
-                                           fg="white",
-                                           bg=colors[5],
-                                           relief="sunken")
+                   grid=[1, 6],
+                   align="right").tk.config(activebackground="green",
+                                            activeforeground="white",
+                                            borderwidth=2,
+                                            cursor="hand2",
+                                            fg="white",
+                                            bg=colors[5],
+                                            relief="sunken")
         PushButton(cont,
                    text="Erase",
                    command=lambda: self.clear_textboxes(self.textboxes_description, self.section_sec.value),
-                   grid=[1, 9],
+                   grid=[1, 7],
                    align="right").tk.config(activebackground="red",
                                             activeforeground="white",
-                                            borderwidth=0,
+                                            borderwidth=2,
                                             cursor="hand2",
                                             fg="white",
                                             bg=colors[5],
@@ -540,14 +630,14 @@ class Gui:
                                              relief="ridge")
         Box(self.description_box,
             width=self.description_box.width,
-            height=35,
+            height=25,
             border=False,
             grid=[0, 6])
         PushButton(self.description_box,
                    text="History",
                    width=40,
                    height=0,
-                   command=None,
+                   command=self.show_history,
                    grid=[0, 7],
                    align="top").tk.config(activebackground=colors[4],
                                           activeforeground="white",
@@ -576,7 +666,7 @@ class Gui:
              grid=[0, 1])
         Box(self.location_box,
             width=self.location_box.width,
-            height=25,
+            height=15,
             border=False,
             grid=[0, 2])
         cont = Box(self.location_box,
@@ -608,41 +698,41 @@ class Gui:
              text="Select Form Section:",
              size=10,
              font="Arial",
-             color="white",
+             color="#FFCE51",
              grid=[0, 12],
              align="left")
         self.section_sec = Combo(cont,
                                  options=["1", "2", "3", "4", "5"],
                                  selected="",
-                                 align="left",
-                                 grid=[1, 12])
+                                 align="top",
+                                 grid=[0, 13])
         self.section_sec.bg = "#C71585"
         self.populate_textboxes(self.textboxes_location)
         Text(cont,
              text="Options Section:",
              size=10,
              font="Arial",
-             color="white",
-             grid=[0, 15],
+             color="#FFCE51",
+             grid=[1, 12, 1, 2],
              align="left")
         PushButton(cont,
                    text="Read",
                    command=lambda: self.update_textboxes(self.textboxes_location, self.section_sec.value),
-                   grid=[1, 15],
-                   align="left").tk.config(activebackground="green",
-                                           activeforeground="white",
-                                           borderwidth=0,
-                                           cursor="hand2",
-                                           fg="white",
-                                           bg=colors[5],
-                                           relief="sunken")
+                   grid=[1, 12],
+                   align="right").tk.config(activebackground="green",
+                                            activeforeground="white",
+                                            borderwidth=2,
+                                            cursor="hand2",
+                                            fg="white",
+                                            bg=colors[5],
+                                            relief="sunken")
         PushButton(cont,
                    text="Erase",
                    command=lambda: self.clear_textboxes(self.textboxes_location, self.section_sec.value),
-                   grid=[1, 15],
+                   grid=[1, 13],
                    align="right").tk.config(activebackground="red",
                                             activeforeground="white",
-                                            borderwidth=0,
+                                            borderwidth=2,
                                             cursor="hand2",
                                             fg="white",
                                             bg=colors[5],
@@ -665,14 +755,14 @@ class Gui:
                                              relief="ridge")
         Box(self.location_box,
             width=self.location_box.width,
-            height=20,
+            height=10,
             border=False,
             grid=[0, 6])
         PushButton(self.location_box,
                    text="History",
                    width=40,
                    height=0,
-                   command=None,
+                   command=self.show_history,
                    grid=[0, 7],
                    align="top").tk.config(activebackground=colors[4],
                                           activeforeground="white",
@@ -700,7 +790,7 @@ class Gui:
              grid=[0, 1])
         Box(self.contact_box,
             width=self.contact_box.width,
-            height=25,
+            height=15,
             border=False,
             grid=[0, 2])
         cont = Box(self.contact_box,
@@ -713,64 +803,75 @@ class Gui:
         self.textboxes_contact = {"CONTACT_PERSON": self.create_element(cont,
                                                                         "Person Contacted:",
                                                                         0),
+                                  "ORG_ADD": self.create_element(cont,
+                                                                 "Mail:",
+                                                                 2),
+                                  "MAIL_ADD": self.create_element(cont,
+                                                                  "Email:",
+                                                                  4),
                                   "FAX_AREA_CODE": self.create_element(cont,
                                                                        "Fax Area Code:",
-                                                                       2),
+                                                                       6),
                                   "FAX_3_MIDDLE_NUMBER": self.create_element(cont,
                                                                              "Fax 3 Middle Number:",
-                                                                             4),
+                                                                             8),
                                   "FAX_4_LAST_NUMBER": self.create_element(cont,
                                                                            "Fax 4 Last Number:",
-                                                                           6),
+                                                                           10),
                                   "MAIL_CONTACT_CHECK": CheckBox(cont,
-                                                                 text="Mail Contact",
-                                                                 grid=[0, 8]),
+                                                                 text="By Mail",
+                                                                 grid=[3, 2, 1, 2]),
                                   "MAIL_CONTACTED_CHECK": CheckBox(cont,
-                                                                   text="Mail Contacted",
-                                                                   grid=[0, 9]),
+                                                                   text="By Email",
+                                                                   grid=[3, 4, 1, 2]),
                                   "FAX_CONTACT_CHECK": CheckBox(cont,
-                                                                text="Fax Contact",
-                                                                grid=[0, 10])}
-        self.populate_textboxes(self.textboxes_contact)
+                                                                text="By Fax",
+                                                                grid=[3, 6, 1, 5])}
+        self.textboxes_contact["MAIL_CONTACT_CHECK"].bg = "#C71585"
+        self.textboxes_contact["MAIL_CONTACT_CHECK"].text_color = "white"
+        self.textboxes_contact["MAIL_CONTACTED_CHECK"].bg = "#C71585"
+        self.textboxes_contact["MAIL_CONTACTED_CHECK"].text_color = "white"
+        self.textboxes_contact["FAX_CONTACT_CHECK"].bg = "#C71585"
+        self.textboxes_contact["FAX_CONTACT_CHECK"].text_color = "white"
         Text(cont,
              text="Select Form Section:",
              size=10,
              font="Arial",
-             color="white",
-             grid=[0, 12],
+             color="#FFCE51",
+             grid=[0, 13],
              align="left")
         self.section_sec = Combo(cont,
                                  options=["1", "2", "3", "4", "5"],
                                  selected="",
-                                 align="left",
-                                 grid=[1, 12])
+                                 align="top",
+                                 grid=[0, 14])
         self.section_sec.bg = "#C71585"
         self.populate_textboxes(self.textboxes_contact)
         Text(cont,
              text="Options Section:",
              size=10,
              font="Arial",
-             color="white",
-             grid=[0, 15],
+             color="#FFCE51",
+             grid=[1, 13, 1, 2],
              align="left")
         PushButton(cont,
                    text="Read",
                    command=lambda: self.update_textboxes(self.textboxes_contact, self.section_sec.value),
-                   grid=[1, 15],
-                   align="left").tk.config(activebackground="green",
-                                           activeforeground="white",
-                                           borderwidth=0,
-                                           cursor="hand2",
-                                           fg="white",
-                                           bg=colors[5],
-                                           relief="sunken")
+                   grid=[1, 13],
+                   align="right").tk.config(activebackground="green",
+                                            activeforeground="white",
+                                            borderwidth=2,
+                                            cursor="hand2",
+                                            fg="white",
+                                            bg=colors[5],
+                                            relief="sunken")
         PushButton(cont,
                    text="Erase",
                    command=lambda: self.clear_textboxes(self.textboxes_contact, self.section_sec.value),
-                   grid=[1, 15],
+                   grid=[1, 14],
                    align="right").tk.config(activebackground="red",
                                             activeforeground="white",
-                                            borderwidth=0,
+                                            borderwidth=2,
                                             cursor="hand2",
                                             fg="white",
                                             bg=colors[5],
@@ -800,7 +901,7 @@ class Gui:
                    text="History",
                    width=40,
                    height=0,
-                   command=None,
+                   command=self.show_history,
                    grid=[0, 7],
                    align="top").tk.config(activebackground=colors[4],
                                           activeforeground="white",
@@ -813,15 +914,141 @@ class Gui:
     def results_section(self):
         self.data = self.load_data_from_file()
         self.results_box.bg = colors[0]
-        pass
+        Box(self.results_box,
+            width=self.results_box.width,
+            height=35,
+            border=False,
+            grid=[0, 0])
+        Text(self.results_box,
+             text="Results of Job Search",
+             size=12,
+             font="Times New Roman",
+             color="red",
+             align="top",
+             grid=[0, 1])
+        Box(self.results_box,
+            width=self.results_box.width,
+            height=40,
+            border=False,
+            grid=[0, 2])
+        cont = Box(self.results_box,
+                   width=400,
+                   height=300,
+                   border=True,
+                   grid=[0, 3],
+                   layout="grid")
+        cont.bg = colors[3]
+        self.textboxes_results = {"HIRED": CheckBox(cont,
+                                                    text="Hired",
+                                                    grid=[0, 0],
+                                                    align="left"),
+                                  "NOT_HIRED": CheckBox(cont,
+                                                        text="Not Hired",
+                                                        grid=[0, 1],
+                                                        align="left"),
+                                  "START_DATE_HIRED": self.create_element(cont,
+                                                                          "Start Date:",
+                                                                          3),
+                                  "CHECK_APPLICATION_FILL": CheckBox(cont,
+                                                                     text="Application Fill",
+                                                                     grid=[1, 0],
+                                                                     align="left"),
+                                  "CHECK_OTHER": CheckBox(cont,
+                                                          text="Other",
+                                                          grid=[1, 1],
+                                                          align="left"),
+                                  "OTHER_JOB_RES": self.create_element(cont,
+                                                                       "Other Job Results:",
+                                                                       4)}
+        self.textboxes_results["HIRED"].bg = "#C71585"
+        self.textboxes_results["HIRED"].text_color = "white"
+        self.textboxes_results["NOT_HIRED"].bg = "#C71585"
+        self.textboxes_results["NOT_HIRED"].text_color = "white"
+        self.textboxes_results["CHECK_APPLICATION_FILL"].bg = "#C71585"
+        self.textboxes_results["CHECK_APPLICATION_FILL"].text_color = "white"
+        self.textboxes_results["CHECK_OTHER"].bg = "#C71585"
+        self.textboxes_results["CHECK_OTHER"].text_color = "white"
+        Text(cont,
+             text="Select Form Section:",
+             size=10,
+             font="Arial",
+             color="#FFCE51",
+             grid=[0, 6],
+             align="left")
+        self.section_sec = Combo(cont,
+                                 options=["1", "2", "3", "4", "5"],
+                                 selected="",
+                                 align="top",
+                                 grid=[0, 7])
+        self.section_sec.bg = "#C71585"
+        self.populate_textboxes(self.textboxes_results)
+        Text(cont,
+             text="Options Section:",
+             size=10,
+             font="Arial",
+             color="#FFCE51",
+             grid=[1, 6, 1, 2],
+             align="left")
+        PushButton(cont,
+                   text="Read",
+                   command=lambda: self.update_textboxes(self.textboxes_results, self.section_sec.value),
+                   grid=[1, 6],
+                   align="right").tk.config(activebackground="green",
+                                            activeforeground="white",
+                                            borderwidth=2,
+                                            cursor="hand2",
+                                            fg="white",
+                                            bg=colors[5],
+                                            relief="sunken")
+        PushButton(cont,
+                   text="Erase",
+                   command=lambda: self.clear_textboxes(self.textboxes_results, self.section_sec.value),
+                   grid=[1, 7],
+                   align="right").tk.config(activebackground="red",
+                                            activeforeground="white",
+                                            borderwidth=2,
+                                            cursor="hand2",
+                                            fg="white",
+                                            bg=colors[5],
+                                            relief="sunken")
+        Box(self.results_box,
+            width=self.results_box.width,
+            height=10,
+            border=False,
+            grid=[0, 13])
+        PushButton(self.results_box,
+                   text="Submit",
+                   command=lambda: self.submit_form(self.textboxes_results),
+                   grid=[0, 14],
+                   align="bottom").tk.config(activebackground="green",
+                                             activeforeground="white",
+                                             borderwidth=7,
+                                             cursor="hand2",
+                                             fg="white",
+                                             bg=colors[4],
+                                             relief="ridge")
+        Box(self.results_box,
+            width=self.results_box.width,
+            height=35,
+            border=False,
+            grid=[0, 15])
+        PushButton(self.results_box,
+                   text="History",
+                   width=40,
+                   height=0,
+                   command=self.show_history,
+                   grid=[0, 16],
+                   align="top").tk.config(activebackground=colors[4],
+                                          activeforeground="white",
+                                          borderwidth=7,
+                                          cursor="hand2",
+                                          fg="white",
+                                          bg=colors[5],
+                                          relief="sunken")
 
     def do_this_when_closed(self):
         if self.app.yesno("Close", "Do you want to quit?"):
             self.app.destroy()
-
-    def display(self):
-        self.app.when_closed = self.do_this_when_closed
-        self.app.display()
 
 
 if __name__ == "__main__":
